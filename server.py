@@ -3,6 +3,7 @@ import itertools
 import fdb
 app = Flask(__name__)
 fdb.api_version(700)
+import json
 
 db = fdb.open()
 db.options.set_transaction_timeout(60000)  # 60,000 ms = 1 minute
@@ -15,10 +16,7 @@ attends = scheduling['attends']
 
 
 student = fdb.directory.create_or_open(db, ('student',))
-student_id = student['student_id']
-
-student_name = student.create_or_open(db, ('name',))
-student_description = student.create_or_open(db, ('description',))
+student_id = student['id']
 
 # Generate 3 classes
 levels = ['intro', 'for dummies']
@@ -29,9 +27,17 @@ class_names = [' '.join(tup) for tup in class_combos]
 
 @fdb.transactional
 def add_class(tr, c):
-    tr[course.pack((c,))] = fdb.tuple.pack((100,))
+    tr[course.pack((c,))] = fdb.tuple.pack((15,'test'))
 
-
+@fdb.transactional
+def search_name_student(tr,keyword):
+    studentList = available_unique_subspace(db, student_id)
+    for i in range(len(studentList)):
+        searchResult = get_value_decode(db, student_id.pack((int(i+1),)))
+        searchResult = dict(zip(searchResult[::2], searchResult[1::2]))
+        if keyword in searchResult['name']:
+            return searchResult
+    return None
 
 # get list field with subspace
 @fdb.transactional
@@ -49,12 +55,12 @@ def available_unique_subspace(tr,subspace):
 # get invidiously value with subspace
 @fdb.transactional
 def get_value_decode(tr,subKey):
-    return (tr[subKey]).decode()
+    return fdb.tuple.unpack((tr[subKey]),)
 
 # get invidiously value with subspace
 @fdb.transactional
 def set_value_decode(tr,subKey,value):
-    tr[subKey] = value.encode()
+    tr[subKey] = value
     
 # get invidiously value with subspace
 @fdb.transactional
@@ -65,7 +71,13 @@ def delete_value(tr,subKey):
 @fdb.transactional
 def clear_subspace(tr, subspace):
     tr.clear_range_startswith(subspace.key())
-
+@fdb.transactional
+def get_range_startswith(tr,subspaceMix):
+    result = {}
+    for k, v in tr.get_range_startswith(subspaceMix):
+        print(k.decode(), v)
+        result = {**result, **{k.decode(): v.decode()}}
+    return result
 
 @app.route('/')
 def hello_world():
@@ -74,20 +86,24 @@ def hello_world():
 @app.route('/signup', methods=['POST'])
 def signup_course():
     data = request.json
-    idName = data["idName"]
+    studentId = data["studentId"]
     courseName = data["courseName"]
-    courseList = available_subspace(db, attends)
-    courseIdName = f'{len(courseList)+1}-{courseName}'
-    set_value_decode(db, scheduling['attends'][idName]['name'], idName)
-    set_value_decode(db, scheduling['attends'][idName]['description'], courseIdName)
-
+    prevArray = str([])
+    try:
+        studentsIdList = get_value_decode(db, attends[courseName])
+        prevArray = str(studentsIdList[1])
+    except:
+        pass
+    array = json.loads(prevArray)
+    array.append(int(studentId))
+    set_value_decode(db, attends[courseName], fdb.tuple.pack(('studentIds',str(array),)))
     return jsonify(data='success')
 
 @app.route('/courses')
 def get_courses():
     name = request.args.get('name')
     if name is not None:
-        result = get_value(db, course, name)
+        result = get_value_decode(db, course[name])
     else:
         result = available_subspace(db, course)
     return jsonify(data=result)
@@ -96,45 +112,39 @@ def get_courses():
 def get_attends():
     name = request.args.get('name')
     if name is not None:
-        resultName = get_value_decode(db, scheduling['attends'][name]['name'])
-        print(resultName)
-        resultDescription = get_value_decode(db, scheduling['attends'][name]['description'])
-        response = {'data':{
-        'description': resultDescription,
-        'name': resultName
-        }}
-        return jsonify(response)
+        result = get_value_decode(db, attends[name])
+        result = dict(zip(result[::2], result[1::2]))
+        return jsonify({'data':result})
     result = available_unique_subspace(db, attends)
     return jsonify(data=result)
 
 @app.route('/students')
 def get_students():
+    id = request.args.get('id')
+    if id is not None:
+        result = get_value_decode(db, student_id.pack((int(id),)))
+        result = dict(zip(result[::2], result[1::2]))
+        return jsonify({'data':result})
     name = request.args.get('name')
     if name is not None:
-        resultName = get_value_decode(db, student_id[name]['name'])
-        resultDescription = get_value_decode(db, student_id[name]['description'])
-        response = {'data':{
-        'description': resultDescription,
-        'name': resultName
-        }}
-        return jsonify(response)
+        result = search_name_student(db, name)
+        return jsonify({'data':result})
     result = available_unique_subspace(db, student_id)
     return jsonify(data=result)
 
 @app.route('/register', methods=['POST'])
 def reset():
     data = request.json
+    name = data["name"]
     description = data["description"]
     studentList = available_unique_subspace(db, student)
-    studentData = f'{len(studentList)+1}-{data["name"]}'
-    set_value_decode(db, student_id[studentData]['name'], data["name"])
-    set_value_decode(db, student_id[studentData]['description'], data["description"])
+    set_value_decode(db, student_id.pack((len(studentList)+1,)), fdb.tuple.pack(('name',name,'description', description)))
     return jsonify(data='successfully register')
 
-@app.route('/attend/<idName>', methods=['DELETE'])
-def delete_attends(idName):
-    delete_value(db, attends[idName]['name'])
-    delete_value(db, attends[idName]['description'])
+@app.route('/attend/<id>', methods=['DELETE'])
+def delete_attends(id):
+    delete_value(db, attends[int(id)]['courseName'])
+    delete_value(db, attends[int(id)]['studentId'])
     return jsonify(data='successfully remove')
 
 @app.route('/subspace/<subspace>')
@@ -153,7 +163,7 @@ def get_subspace(subspace):
 @fdb.transactional
 def init(tr):
     del tr[scheduling.range(())]
-    # del tr[student_description.range(())]
+    # del tr[attends.range(())]
     # del tr[student.range(())]
     # del tr[student_name.range(())]
     # del tr[student_id.range(())]
@@ -162,13 +172,34 @@ def init(tr):
         add_class(tr, class_name)
 
 
+
 @fdb.transactional
 def test(tr):
-    result = tr[student['1-thien']]
-    print(result)
+    # for k, v in tr.get_range_startswith(student_id.pack((1,))):
+    #     print(k, v)
+    # print(get_range_startswith(db, student_id.pack((1,))))
+    # result = tr[student_id['1']['name']]
+    # print(student.pack(('id',1))) 
+    # print(available_subspace(tr,course))
+    # tr[student_id.pack((99,))] = fdb.tuple.pack(('name', 'bob','description','testing'))
+    # result = get_value_decode(db, scheduling.pack(('attends','1:00 chem for dummies')))
+    # set_value_decode(db, subKey, value)
+    # for k, v in tr[attends.range(())]:
+    #     print(k)
+    # b'\x15\x04\x02attends\x00\x021:00 chem for dummies\x00'
+    print(fdb.tuple.unpack(tr[attends.pack(('1:00 chem for dummies',))]))
+    # b'\x15\x04\x02attends\x00\x02attends\x00\x021:00 chem for dummies\x00'
+    # print(tr[b'\x15\x04\x02attends\x00\x02attends\x00\x021:00 chem for dummies\x00'])
+    # print(tr[student_id.pack((1,'name'))])
     
+
+    # courseTemp = tr[course.pack(('1:00 chem for dummies',))]
+    # print(fdb.tuple.unpack(courseTemp)[0])
+    
+    # print(studentList)
+    # for k, v in tr.get_range(student_id.range().start, student_id.range().stop):
+    #     print(k, v)    
 if __name__ == '__main__':  
     # init(db)
     # test(db) 
-    # print(available_unique_subspace(db,student))
     app.run()
