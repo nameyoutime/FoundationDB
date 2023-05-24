@@ -27,7 +27,7 @@ class_names = [' '.join(tup) for tup in class_combos]
 
 @fdb.transactional
 def add_class(tr, c):
-    tr[course.pack((c,))] = fdb.tuple.pack((15,'test'))
+    tr[course.pack((c,))] = fdb.tuple.pack((15,))
 
 @fdb.transactional
 def search_name_student(tr,keyword):
@@ -55,8 +55,10 @@ def available_unique_subspace(tr,subspace):
 # get invidiously value with subspace
 @fdb.transactional
 def get_value_decode(tr,subKey):
-    return fdb.tuple.unpack((tr[subKey]),)
-
+    try:
+        return fdb.tuple.unpack((tr[subKey]),)
+    except:
+        return tuple('',)
 # get invidiously value with subspace
 @fdb.transactional
 def set_value_decode(tr,subKey,value):
@@ -147,10 +149,9 @@ def reset():
     set_value_decode(db, student_id.pack((int(len(studentList)+1),)), fdb.tuple.pack(tuple(newStudent.items())))
     return jsonify(data='successfully register')
 
-@app.route('/attend/<id>', methods=['DELETE'])
-def delete_attends(id):
-    delete_value(db, attends[int(id)]['courseName'])
-    delete_value(db, attends[int(id)]['studentId'])
+@app.route('/attend/<courseName>', methods=['DELETE'])
+def delete_attends(courseName):
+    set_value_decode(db, attends[courseName], fdb.tuple.pack(('',)))
     return jsonify(data='successfully remove')
 
 @app.route('/subspace/<subspace>')
@@ -171,41 +172,11 @@ def init(tr):
     del tr[scheduling.range(())]
     del tr[attends.range(())]
     # del tr[student.range(())]
-    # del tr[student_name.range(())]
     # del tr[student_id.range(())]
     
     for class_name in class_names:
         add_class(tr, class_name)
 
-
-
-@fdb.transactional
-def test(tr):
-    # for k, v in tr.get_range_startswith(student_id.pack((1,))):
-    #     print(k, v)
-    # print(get_range_startswith(db, student_id.pack((1,))))
-    # result = tr[student_id['1']['name']]
-    # print(student.pack(('id',1))) 
-    # print(available_subspace(tr,course))
-    # tr[student_id.pack((99,))] = fdb.tuple.pack(('name', 'bob','description','testing'))
-    # result = get_value_decode(db, scheduling.pack(('attends','1:00 chem for dummies')))
-    # set_value_decode(db, subKey, value)
-    # for k, v in tr[attends.range(())]:
-    #     print(k)
-    # b'\x15\x04\x02attends\x00\x021:00 chem for dummies\x00'
-    print(fdb.tuple.unpack(tr[attends.pack(('1:00 chem for dummies',))]))
-    # b'\x15\x04\x02attends\x00\x02attends\x00\x021:00 chem for dummies\x00'
-    # print(tr[b'\x15\x04\x02attends\x00\x02attends\x00\x021:00 chem for dummies\x00'])
-    # print(tr[student_id.pack((1,'name'))])
-    
-
-    # courseTemp = tr[course.pack(('1:00 chem for dummies',))]
-    # print(fdb.tuple.unpack(courseTemp)[0])
-    
-    # print(studentList)
-    # for k, v in tr.get_range(student_id.range().start, student_id.range().stop):
-    #     print(k, v)    
 if __name__ == '__main__':  
     # init(db)
-    # test(db) 
     app.run()
