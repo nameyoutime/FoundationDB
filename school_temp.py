@@ -88,16 +88,21 @@ def signup_course():
     data = request.json
     studentId = data["studentId"]
     courseName = data["courseName"]
-    prevArray = str([])
+    prevArray = []
     try:
         studentsIdList = get_value_decode(db, attends[courseName])
-        prevArray = str(studentsIdList[1])
+        prevArray = dict(studentsIdList)['studentIds']
     except:
         pass
-    array = json.loads(prevArray)
-    array.append(int(studentId))
-    set_value_decode(db, attends[courseName], fdb.tuple.pack(('studentIds',str(array),)))
+    data = {'studentIds':appendTuple(prevArray,int(studentId))}
+    set_value_decode(db, attends[courseName], fdb.tuple.pack(tuple(data.items())))
     return jsonify(data='success')
+
+def appendTuple(my_tuple,appendValue):
+    my_list = list(my_tuple)
+    my_list.append(appendValue)
+    result_tuple = tuple(my_list)
+    return result_tuple
 
 @app.route('/courses')
 def get_courses():
@@ -113,7 +118,7 @@ def get_attends():
     name = request.args.get('name')
     if name is not None:
         result = get_value_decode(db, attends[name])
-        result = dict(zip(result[::2], result[1::2]))
+        result = dict(result)
         return jsonify({'data':result})
     result = available_unique_subspace(db, attends)
     return jsonify(data=result)
@@ -123,7 +128,7 @@ def get_students():
     id = request.args.get('id')
     if id is not None:
         result = get_value_decode(db, student_id.pack((int(id),)))
-        result = dict(zip(result[::2], result[1::2]))
+        result = dict(result)
         return jsonify({'data':result})
     name = request.args.get('name')
     if name is not None:
@@ -138,7 +143,8 @@ def reset():
     name = data["name"]
     description = data["description"]
     studentList = available_unique_subspace(db, student)
-    set_value_decode(db, student_id.pack((len(studentList)+1,)), fdb.tuple.pack(('name',name,'description', description)))
+    newStudent = {'id':int(len(studentList)+1),'name':name,'description':description}
+    set_value_decode(db, student_id.pack((int(len(studentList)+1),)), fdb.tuple.pack(tuple(newStudent.items())))
     return jsonify(data='successfully register')
 
 @app.route('/attend/<id>', methods=['DELETE'])
@@ -163,7 +169,7 @@ def get_subspace(subspace):
 @fdb.transactional
 def init(tr):
     del tr[scheduling.range(())]
-    # del tr[attends.range(())]
+    del tr[attends.range(())]
     # del tr[student.range(())]
     # del tr[student_name.range(())]
     # del tr[student_id.range(())]
